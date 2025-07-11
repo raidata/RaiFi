@@ -1,0 +1,91 @@
+
+(function ($) {
+    "use strict";
+
+    /*==================================================================
+    [ Focus Contact2 ]*/
+    $('.input100').each(function () {
+        $(this).on('blur', function () {
+            if ($(this).val().trim() != "") {
+                $(this).addClass('has-val');
+            }
+            else {
+                $(this).removeClass('has-val');
+            }
+        })
+    })
+
+    /*==================================================================
+    [ Validate ]*/
+    var input = $('.validate-input .input100');
+
+    $('.validate-form').on('submit', function () {
+        var check = true;
+        for (var i = 0; i < input.length; i++) {
+            if (validate(input[i]) == false) {
+                showValidate(input[i]);
+                check = false;
+            }
+        }
+        return check;
+    });
+    $('.validate-form .input100').each(function () {
+        $(this).focus(function () {
+            hideValidate(this);
+        });
+    });
+
+    function validate(input) {
+        if ($(input).val().trim() == '') {
+            return false;
+        }
+        else if ($(input).attr('name') == 'address') {
+            var chkp = CheckEtherumAddress($(input).val().trim());
+            if (chkp) {
+                $(input).parent().attr('data-validate', '[Address] format is invalid');
+                return false;
+            }
+        }
+        else if ($(input).attr('name') == 'referral') {
+            var chkp = CheckEtherumAddress($(input).val().trim());
+            if (chkp) {
+                $(input).parent().attr('data-validate', '[Referral address] format is invalid');
+                return false;
+            }
+        }
+        else if ($(input).attr('name') == 'genealogy') {
+            var s = $(input).val().trim();
+            if (s != '') {
+                var chkp = CheckEtherumAddress($(input).val().trim());
+                if (chkp) {
+                    $(input).parent().attr('data-validate', '[Genealogy address] format is invalid');
+                    return false;
+                }
+            }
+        }
+    }
+
+    function showValidate(input) {
+        var thisAlert = $(input).parent();
+        $(thisAlert).addClass('alert-validate');
+    }
+
+    function hideValidate(input) {
+        var thisAlert = $(input).parent();
+
+        $(thisAlert).removeClass('alert-validate');
+    }
+    function CheckEtherumAddress(address) {
+        if (!/^(0x)?[0-9a-f]{40}$/i.test(address)) {
+            // check if it has the basic requirements of an address
+            return false;
+        } else if (/^(0x)?[0-9a-f]{40}$/.test(address) || /^(0x)?[0-9A-F]{40}$/.test(address)) {
+            // If it's all small caps or all all caps, return true
+            return true;
+        } else {
+            // Otherwise check each case
+            return true;
+        }
+    };
+
+})(jQuery);

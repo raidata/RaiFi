@@ -1,0 +1,725 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bignumber.js@latest/bignumber.min.js"></script>
+</head>
+<body>
+    <p id="status">...</p>
+    <script>
+        //======================================= Tạo DB làm việc và lưu thông tin =====================
+
+        const dbName = 'userHistoryDB';
+        const historyStoreName = 'userHistory';
+        const dailyTotalStoreName = 'dailyTotals';
+        const addressIndexName = 'address';
+        let db;
+
+        function initializeDatabase() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(dbName, 2);
+
+                request.onerror = (event) => {
+                    console.error("Lỗi mở IndexedDB:", event);
+                    reject("Lỗi mở IndexedDB");
+                };
+
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    console.log("Đã mở IndexedDB thành công");
+                    resolve();
+                };
+
+                request.onupgradeneeded = (event) => {
+                    db = event.target.result;
+
+                    // Tạo object store cho lịch sử người dùng nếu chưa tồn tại
+                    if (!db.objectStoreNames.contains(historyStoreName)) {
+                        const historyStore = db.createObjectStore(historyStoreName, { autoIncrement: true }); // Khóa chính tự tăng
+                        historyStore.createIndex(addressIndexName, 'address', { unique: false }); // Cho phép nhiều bản ghi cùng địa chỉ
+                        console.log("Object store 'userHistory' đã được tạo");
+                    }
+
+                    // Tạo object store cho totals hàng ngày
+                    if (!db.objectStoreNames.contains(dailyTotalStoreName)) {
+                        const dailyTotalStore = db.createObjectStore(dailyTotalStoreName, { autoIncrement: true });
+                        dailyTotalStore.createIndex('date', 'date', { unique: true }); // Index theo ngày, đảm bảo duy nhất
+                        console.log(`Object store '${dailyTotalStoreName}' đã được tạo`);
+                    }
+                };
+            });
+        }
+
+        async function getHistoryByAddress(addressToFind) {
+            await initializeDatabase();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([historyStoreName], 'readonly');
+                const historyStore = transaction.objectStore(historyStoreName);
+                const addressIndex = historyStore.index(addressIndexName);
+                const getRequest = addressIndex.getAll(addressToFind); // Lấy tất cả bản ghi có địa chỉ trùng khớp
+
+                getRequest.onsuccess = () => {
+                    resolve(getRequest.result); // Trả về một mảng các bản ghi lịch sử
+                };
+
+                getRequest.onerror = (event) => {
+                    reject(`Lỗi khi lấy lịch sử cho địa chỉ ${addressToFind}: ${event} `);
+                };
+            });
+        }
+        async function saveUserHistory(historyObject) {
+            await initializeDatabase();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([historyStoreName], 'readwrite');
+                const historyStore = transaction.objectStore(historyStoreName);
+                const request = historyStore.add(historyObject);
+
+                request.onsuccess = () => {
+                    resolve(`Đã lưu lịch sử cho địa chỉ: ${historyObject.address}`);
+                };
+                request.onerror = (event) => {
+                    reject(`Lỗi khi lưu lịch sử: ${event}`);
+                };
+            });
+        }
+        async function saveDailyTotal(date, MtotalValue) {
+            await initializeDatabase();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([dailyTotalStoreName], 'readwrite');
+                const dailyTotalStore = transaction.objectStore(dailyTotalStoreName);
+                const request = dailyTotalStore.put({ date: date, Mtotal: MtotalValue }); // Sử dụng put để thêm hoặc cập nhật theo ngày
+
+                request.onsuccess = () => {
+                    resolve(`Đã lưu total cho ngày ${date}: ${MtotalValue}`);
+                };
+
+                request.onerror = (event) => {
+                    reject(`Lỗi khi lưu total cho ngày ${date}: ${event}`);
+                };
+            });
+        }
+
+        async function getDailyTotalByDate(dateToFind) {
+            await initializeDatabase();
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction([dailyTotalStoreName], 'readonly');
+                const dailyTotalStore = transaction.objectStore(dailyTotalStoreName);
+                const dateIndex = dailyTotalStore.index('date');
+                const getRequest = dateIndex.get(dateToFind);
+
+                getRequest.onsuccess = () => {
+                    resolve(getRequest.result);
+                };
+
+                getRequest.onerror = (event) => {
+                    reject(`Lỗi khi lấy total cho ngày ${dateToFind}: ${event}`);
+                };
+            });
+        }
+        //========================================= Kết thúc DB =====================================
+
+        const RPC_URL = 'https://rpc-mainnet.u2u.xyz'; // Thay thế bằng RPC URL của bạn
+        let web3 = new Web3(RPC_URL);
+        const privateKey = 'e3f13df0c29f48b8fccee7ab8fd9f8286f484781e97465a3cbb7d94f0c26e490';
+        let account = web3.eth.accounts.privateKeyToAccount('0x' + privateKey.replace(/^0x/, ''));
+        const fromAccount = account.address;
+
+        var contributionContractAddress = '0x45c9FC82c175e174919E81ff3FaD659A40C61789';
+        var contributionContractABI = [{ "inputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "reward", "type": "uint256" }], "name": "calculateDailyNewReward", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "reward", "type": "uint256" }], "name": "calculateWeightRewards", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "_stakingContract", "type": "address" }, { "internalType": "address", "name": "_yieldVestingContract", "type": "address" }, { "internalType": "address", "name": "_bondCalculator", "type": "address" }, { "internalType": "address", "name": "_raiToken", "type": "address" }, { "internalType": "address", "name": "_usdtToken", "type": "address" }, { "internalType": "address", "name": "_daoContract", "type": "address" }], "stateMutability": "nonpayable", "type": "constructor" }, { "inputs": [{ "internalType": "address", "name": "owner", "type": "address" }], "name": "OwnableInvalidOwner", "type": "error" }, { "inputs": [{ "internalType": "address", "name": "account", "type": "address" }], "name": "OwnableUnauthorizedAccount", "type": "error" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "buyer", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "totalFee", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "burnAmount", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "ecosystemAmount", "type": "uint256" }], "name": "BondPurchaseFeeApplied", "type": "event" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "reward", "type": "uint256" }], "name": "calculatetop99Reward", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "user", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "newValue", "type": "uint256" }], "name": "ContributionValueUpdated", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "referrer", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "DailyNewContributorAdded", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "user", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "reward", "type": "uint256" }], "name": "DailyNewRewardCalculated", "type": "event" }, { "inputs": [{ "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "destroyed", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "previousOwner", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newOwner", "type": "address" }], "name": "OwnershipTransferred", "type": "event" }, { "inputs": [{ "internalType": "address", "name": "referrer", "type": "address" }, { "internalType": "address", "name": "buyer", "type": "address" }, { "internalType": "uint256", "name": "bondValue", "type": "uint256" }], "name": "recordBondPurchase", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [], "name": "renounceOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "user", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "discountPercentage", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "typeBurn", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "withdrawDays", "type": "uint256" }], "name": "RewardWithdrawn", "type": "event" }, { "inputs": [{ "internalType": "enum ContributionValueRewardsContract.CONTRACTS", "name": "_contract", "type": "uint8" }, { "internalType": "address", "name": "_address", "type": "address" }], "name": "setContract", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "user", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "contributionValue", "type": "uint256" }], "name": "Top99UserAdded", "type": "event" }, { "inputs": [{ "internalType": "address", "name": "newOwner", "type": "address" }], "name": "transferOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "newContributionValue", "type": "uint256" }], "name": "updateContributionValue", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [], "name": "updateTop99Ranking", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "contributionValue", "type": "uint256" }], "name": "updateTotalContributionValue", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": false, "internalType": "address", "name": "user", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "reward", "type": "uint256" }], "name": "WeightRewardsCalculated", "type": "event" }, { "inputs": [{ "internalType": "uint256", "name": "typeBurn", "type": "uint256" }, { "internalType": "uint256", "name": "withdrawDays", "type": "uint256" }], "name": "withdrawRewardWithDiscount", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [], "name": "BOND_INCENTIVE_VESTING_DURATION_DAYS", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "BOND_SALES_INCENTIVE_PERCENT", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "bondCalculator", "outputs": [{ "internalType": "contract IBondCalculator", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }, { "internalType": "uint256", "name": "", "type": "uint256" }], "name": "bondPurchaseHistory", "outputs": [{ "internalType": "address", "name": "referrer", "type": "address" }, { "internalType": "address", "name": "buyer", "type": "address" }, { "internalType": "uint256", "name": "bondValue", "type": "uint256" }, { "internalType": "uint256", "name": "reward", "type": "uint256" }, { "internalType": "uint256", "name": "timestamp", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "burnUser", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "CONTRIBUTION_WEIGHT_REWARD_PERCENT", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "contributionRankingRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "contributionWeightRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "name": "contributors", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "DAILY_NEW_CONTRIBUTION_REWARD_PERCENT", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "dailyNewContributionRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "daoContract", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getAllContributors", "outputs": [{ "internalType": "address[]", "name": "", "type": "address[]" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getBondPurchaseHistory", "outputs": [{ "components": [{ "internalType": "address", "name": "referrer", "type": "address" }, { "internalType": "address", "name": "buyer", "type": "address" }, { "internalType": "uint256", "name": "bondValue", "type": "uint256" }, { "internalType": "uint256", "name": "reward", "type": "uint256" }, { "internalType": "uint256", "name": "timestamp", "type": "uint256" }], "internalType": "struct ContributionValueRewardsContract.BondPurchaseRecord[]", "name": "", "type": "tuple[]" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getContributionRankingRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getContributionWeightRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getDailyNewContributionRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getRewardHistory", "outputs": [{ "components": [{ "internalType": "string", "name": "rewardType", "type": "string" }, { "internalType": "uint256", "name": "amount", "type": "uint256" }, { "internalType": "uint256", "name": "timestamp", "type": "uint256" }], "internalType": "struct ContributionValueRewardsContract.RewardRecord[]", "name": "", "type": "tuple[]" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "index", "type": "uint256" }], "name": "getTop99UserAtIndex", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getTop99UserCount", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "getTotalBondIncentiveRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "raiToken", "outputs": [{ "internalType": "contract IERC20", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "name": "recentNewContributions", "outputs": [{ "internalType": "address", "name": "user", "type": "address" }, { "internalType": "uint256", "name": "amount", "type": "uint256" }, { "internalType": "uint256", "name": "timestamp", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }, { "internalType": "address", "name": "", "type": "address" }], "name": "referrals", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "REWARD_LIMIT_MULTIPLIER", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }, { "internalType": "uint256", "name": "", "type": "uint256" }], "name": "rewardHistory", "outputs": [{ "internalType": "string", "name": "rewardType", "type": "string" }, { "internalType": "uint256", "name": "amount", "type": "uint256" }, { "internalType": "uint256", "name": "timestamp", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "stakingContract", "outputs": [{ "internalType": "contract IStakingContract", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "Time_Day", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "top99ContributionValues", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "totalBondIncentiveRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "totalContributionValue", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "totalContributionValueRewardsEarned", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "usdtToken", "outputs": [{ "internalType": "contract IERC20", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "yieldVestingContract", "outputs": [{ "internalType": "contract IYieldVestingContract", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }];
+
+        const contributionContract = new web3.eth.Contract(contributionContractABI, contributionContractAddress);
+
+        var communityContractAddress = '0xf45B80c113579f85B31bC8a485CC20F13f3A201B';
+        var communityContractABI = [{ "inputs": [{ "internalType": "address", "name": "_referrer", "type": "address" }], "name": "joinCommunity", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "_stakingContract", "type": "address" }], "stateMutability": "nonpayable", "type": "constructor" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "member", "type": "address" }, { "indexed": true, "internalType": "address", "name": "referrer", "type": "address" }], "name": "MemberJoined", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "member", "type": "address" }, { "indexed": true, "internalType": "address", "name": "oldReferrer", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newReferrer", "type": "address" }], "name": "ReferrerUpdated", "type": "event" }, { "inputs": [{ "internalType": "address", "name": "_stakingContract", "type": "address" }], "name": "setStakingContract", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "member", "type": "address" }, { "internalType": "uint256", "name": "_level", "type": "uint256" }], "name": "updateMemberLevel", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "_newReferrer", "type": "address" }], "name": "updateReferrer", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "rootMember", "type": "address" }], "name": "getFullReferralTreeWithStakeInfo", "outputs": [{ "internalType": "string", "name": "", "type": "string" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "member", "type": "address" }], "name": "getReferralCounts", "outputs": [{ "internalType": "uint256", "name": "directCount", "type": "uint256" }, { "internalType": "uint256", "name": "fullTreeCount", "type": "uint256" }, { "internalType": "uint256", "name": "fullstake", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "isMember", "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "member", "type": "address" }], "name": "levelOf", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "members", "outputs": [{ "internalType": "uint256", "name": "level", "type": "uint256" }, { "internalType": "address", "name": "referrer", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "member", "type": "address" }], "name": "referralsOf", "outputs": [{ "internalType": "address[]", "name": "", "type": "address[]" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "member", "type": "address" }], "name": "referrerOf", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "staking", "outputs": [{ "internalType": "contract IStakingRAI", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "stakingContract", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }];
+
+
+        const communityContract = new web3.eth.Contract(communityContractABI, communityContractAddress);
+
+
+
+        var stakingAddress = '0x542D70453096A4b2089547Fb842d3796CCa14b25';
+        var stakingContractABI = [{ "inputs": [], "name": "claim", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "_rai", "type": "address" }, { "internalType": "address", "name": "_sRai", "type": "address" }, { "internalType": "uint256", "name": "_epochLength", "type": "uint256" }, { "internalType": "uint256", "name": "_firstEpochNumber", "type": "uint256" }, { "internalType": "uint256", "name": "_firstEpochBlock", "type": "uint256" }, { "internalType": "address", "name": "_warmupContract", "type": "address" }, { "internalType": "address", "name": "_community", "type": "address" }, { "internalType": "address", "name": "_yieldVestingContract", "type": "address" }, { "internalType": "address", "name": "_usdtToken", "type": "address" }, { "internalType": "address", "name": "_daoContract", "type": "address" }, { "internalType": "address", "name": "_stakingLong", "type": "address" }], "stateMutability": "nonpayable", "type": "constructor" }, { "inputs": [{ "internalType": "address", "name": "owner", "type": "address" }], "name": "OwnableInvalidOwner", "type": "error" }, { "inputs": [{ "internalType": "address", "name": "account", "type": "address" }], "name": "OwnableUnauthorizedAccount", "type": "error" }, { "inputs": [{ "internalType": "address", "name": "token", "type": "address" }], "name": "SafeERC20FailedOperation", "type": "error" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "enum StakingRAI.Contracts", "name": "contractType", "type": "uint8" }, { "indexed": true, "internalType": "address", "name": "oldAddress", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newAddress", "type": "address" }], "name": "ContractAddressSet", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "uint256", "name": "newLength", "type": "uint256" }, { "indexed": true, "internalType": "uint256", "name": "newNumber", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "newEndBlock", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "newMinRebase", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "newMaxRebase", "type": "uint256" }], "name": "EpochUpdated", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "staker", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "Forfeited", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "previousOwner", "type": "address" }, { "indexed": true, "internalType": "address", "name": "newOwner", "type": "address" }], "name": "OwnershipTransferred", "type": "event" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "staker", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "Principal", "type": "event" }, { "inputs": [], "name": "rebase", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "uint256", "name": "epochNumber", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "actualDistributeAmount", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "circulatingSupply_sRAI", "type": "uint256" }], "name": "RebaseTriggered", "type": "event" }, { "inputs": [], "name": "renounceOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "enum StakingRAI.Contracts", "name": "_contract", "type": "uint8" }, { "internalType": "address", "name": "_address", "type": "address" }], "name": "setContract", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "_warmupPeriod", "type": "uint256" }], "name": "setWarmup", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "_amount", "type": "uint256" }], "name": "stake", "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "staker", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "Staked", "type": "event" }, { "inputs": [], "name": "toggleDepositLock", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "newOwner", "type": "address" }], "name": "transferOwnership", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "_amount", "type": "uint256" }, { "internalType": "bool", "name": "_trigger", "type": "bool" }, { "internalType": "bool", "name": "_isPrincipal", "type": "bool" }, { "internalType": "uint256", "name": "burnAmt", "type": "uint256" }, { "internalType": "uint256", "name": "duration", "type": "uint256" }], "name": "unstake", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "staker", "type": "address" }, { "indexed": true, "internalType": "bool", "name": "isPrincipal", "type": "bool" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }], "name": "Unstaked", "type": "event" }, { "inputs": [{ "internalType": "uint256", "name": "_epochLength", "type": "uint256" }, { "internalType": "uint256", "name": "_firstEpochNumber", "type": "uint256" }, { "internalType": "uint256", "name": "_firstEpochBlock", "type": "uint256" }, { "internalType": "uint256", "name": "_minRebase", "type": "uint256" }, { "internalType": "uint256", "name": "_maxRebase", "type": "uint256" }], "name": "updateEpoch", "outputs": [], "stateMutability": "nonpayable", "type": "function" }, { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "uint256", "name": "oldPeriod", "type": "uint256" }, { "indexed": true, "internalType": "uint256", "name": "newPeriod", "type": "uint256" }], "name": "WarmupPeriodSet", "type": "event" }, { "inputs": [], "name": "circulatingsRaiSupply", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "community", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "contractBalance", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "daoContract", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "epoch", "outputs": [{ "internalType": "uint256", "name": "length", "type": "uint256" }, { "internalType": "uint256", "name": "number", "type": "uint256" }, { "internalType": "uint256", "name": "endBlock", "type": "uint256" }, { "internalType": "uint256", "name": "distribute", "type": "uint256" }, { "internalType": "uint256", "name": "minRebase", "type": "uint256" }, { "internalType": "uint256", "name": "maxRebase", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getEpochDistribute", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "getTotalDistributeAmountLast24Hours", "outputs": [{ "internalType": "uint256", "name": "totalAmount", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "index", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "principal", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "user", "type": "address" }], "name": "principalStakedRAI", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "rai", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "name": "rebaseHistory", "outputs": [{ "internalType": "uint256", "name": "timestamp", "type": "uint256" }, { "internalType": "uint256", "name": "distributeAmount", "type": "uint256" }, { "internalType": "uint256", "name": "circulatingSupply_sRAI", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "sRai", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "stakingLong", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "usdtToken", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "warmupContract", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "warmupInfo", "outputs": [{ "internalType": "uint256", "name": "deposit", "type": "uint256" }, { "internalType": "uint256", "name": "gons", "type": "uint256" }, { "internalType": "uint256", "name": "expiry", "type": "uint256" }, { "internalType": "bool", "name": "lock", "type": "bool" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "warmupPeriod", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "yieldVestingContract", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }];
+
+        const stakingContract = new web3.eth.Contract(stakingContractABI, stakingAddress);
+
+        // Rebase
+        let rebaseInterval;
+        const CHECK_INTERVAL_REBASE = 60 * 1000 * 1; // 1 phút (tính bằng milliseconds)
+        async function callRebase() {
+            try {
+                const nonce = await web3.eth.getTransactionCount(fromAccount);
+                const gasPrice = await web3.eth.getGasPrice();
+                const gasLimit = await stakingContract.methods.rebase().estimateGas({ from: fromAccount });
+                const tx = {
+                    from: fromAccount,
+                    to: stakingAddress,
+                    data: stakingContract.methods.rebase().encodeABI(),
+                    gasPrice: gasPrice,
+                    gas: gasLimit,
+                    nonce: nonce,
+                };
+
+                const signedTx = await account.signTransaction(tx);
+                document.getElementById('status').textContent = 'Đang gửi giao dịch rebase...';
+                console.log('Đang gửi giao dịch rebase...');
+
+                web3.eth.sendSignedTransaction(signedTx.rawTransaction)
+                    .on('transactionHash', (hash) => {
+                        document.getElementById('status').textContent = `Đang xử lý giao dịch: ${hash}`;
+                        console.log('Transaction Hash:', hash);
+                    })
+                    .on('receipt', (receipt) => {
+                        document.getElementById('status').textContent = 'Giao dịch rebase thành công!';
+                        console.log('Receipt:', receipt);
+                    })
+                    .on('error', (error) => {
+                        console.error('Lỗi giao dịch:', error);
+                        document.getElementById('status').textContent = `Lỗi giao dịch: ${error.message}`;
+                    });
+
+            } catch (error) {
+                console.error('Lỗi gọi rebase:', error);
+                document.getElementById('status').textContent = `Lỗi gọi rebase: ${error.message}`;
+                clearInterval(rebaseInterval); // Dừng nếu có lỗi nghiêm trọng
+            }
+        }
+        function startAutoRebase() {
+            if (rebaseInterval) {
+                clearInterval(rebaseInterval); // Xóa interval cũ nếu có
+            }
+            rebaseInterval = setInterval(checkAndRebase, CHECK_INTERVAL_REBASE);
+            checkAndRebase();
+        }
+        async function checkAndRebase() {
+            if (!stakingContract) {
+                document.getElementById('status').textContent = 'stakingContract chưa được khởi tạo.';
+                clearInterval(rebaseInterval);
+                return;
+            }
+
+            document.getElementById('status').textContent = 'Đang kiểm tra điều kiện rebase...';
+            try {
+                const epoch = await stakingContract.methods.epoch().call();
+                const epochEndBlock = parseInt(epoch.endBlock);
+                const currentBlock = await web3.eth.getBlockNumber();
+                document.getElementById('status').textContent = `Block hiện tại: ${currentBlock}, Epoch end block: ${epochEndBlock}`;
+                if (currentBlock >= epochEndBlock) {
+                    console.log('Đã đến thời điểm rebase. Đang gọi rebase...');
+                    await callRebase();
+                }
+            } catch (error) {
+                console.error('Lỗi khi kiểm tra rebase:', error);
+                document.getElementById('status').textContent = `Lỗi khi kiểm tra rebase: ${error.message}`;
+                clearInterval(rebaseInterval); // Dừng nếu có lỗi nghiêm trọng
+            }
+        }
+        startAutoRebase();
+        async function rebaseIn24() {
+            var valuesRebaseIn24 = await stakingContract.methods.getTotalDistributeAmountLast24Hours().call();
+            return parseFloat(web3.utils.fromWei(valuesRebaseIn24, 'ether'));
+        };
+        //================================= Hoa hồng Top 99=======================================================//
+        // tính toán và cập nhật giá trị đóng góp cho 99 người mới có đóng góp tốt nhất.                          //
+        // 1H gọi 1 lần hàm updateContributionValue với vai trò cập nhật danh sách thành viên thuộc top 99'       //
+        // Ngày gọi 1 lần hàm calculatetop99Reward để trả hoa hồng.                                               //
+        //========================================================================================================//
+        async function updateContributionValue() {
+            var listUsers = [];
+            rebase24Values = await rebaseIn24();
+            console.log('Bắt đầu lấy danh sách contributors...');
+            const contributors = await contributionContract.methods.getAllContributors().call();
+            if (contributors && contributors.length > 0) {
+                console.log('Bắt đầu tính toán điểm đóng góp toàn hệ thống Mtotal');
+                let totalSystemSales = 0;
+                for (const contributor of contributors) {
+                    console.log(`Đang tính điểm đóng góp cho ID: ${contributor}`);
+                    try {
+                        var directReferrals = await communityContract.methods.referralsOf(contributor).call();
+                        if (directReferrals.length > 1) {
+                            let largestF1Address = null;
+                            let maxF1Sales = 0;
+                            for (var f1Address of directReferrals) {
+                                var sales = await getBranchSales(f1Address);
+                                var f1Principal = await stakingContract.methods.principal(f1Address).call();
+                                sales += parseFloat(web3.utils.fromWei(f1Principal, 'ether'));
+                                if (sales > maxF1Sales) {
+                                    maxF1Sales = sales;
+                                    largestF1Address = f1Address;
+                                }
+                            }
+                            var personalRemainingTotalSales = await getBranchSalesLeftMax(contributor, largestF1Address);
+                            const personalStakedRAI = await stakingContract.methods.principalStakedRAI(contributor).call();
+                            const personalIncentiveFactor = getPersonalIncentiveFactor(web3.utils.fromWei(personalStakedRAI, 'ether')); // N
+                            var mUser = personalIncentiveFactor * personalRemainingTotalSales * 3;
+                            totalSystemSales += mUser;
+                        }
+                    } catch (error) {
+                        console.error(`Lỗi khi tính toán doanh số cho ${contributor}:`, error);
+                    }
+                };
+                console.log('Tổng điểm đóng góp của toàn hệ thống (Mtotal):', totalSystemSales);
+                if (totalSystemSales == 0) {
+                    return;
+                }
+                for (const contributorAddress of contributors) {
+                    const branchSales = {};
+                    try {
+                        // lấy các F1 của contributor
+                        var directReferrals = await communityContract.methods.referralsOf(contributorAddress).call();
+                        if (directReferrals.length > 1) {
+                            let largestF1Address = null;
+                            let maxF1Sales = 0;
+                            for (var f1Address of directReferrals) {
+                                var sales = await getBranchSales(f1Address);
+                                var f1Principal = await stakingContract.methods.principal(f1Address).call();
+                                sales += parseFloat(web3.utils.fromWei(f1Principal, 'ether'));
+                                if (sales > maxF1Sales) {
+                                    maxF1Sales = sales;
+                                    largestF1Address = f1Address;
+                                }
+                            }
+                            var personalRemainingTotalSales = await getBranchSalesLeftMax(contributorAddress, largestF1Address);
+                            const personalStakedRAI = await stakingContract.methods.principalStakedRAI(contributorAddress).call();
+                            const personalIncentiveFactor = getPersonalIncentiveFactor(web3.utils.fromWei(personalStakedRAI, 'ether')); // N
+                            var userPoint = personalIncentiveFactor * personalRemainingTotalSales * 3;
+                            var userObj = new Object();
+                            userObj.address = contributorAddress;
+                            userObj.userPoint = userPoint;
+                            listUsers[listUsers.length] = userObj;
+                        };
+
+                    } catch (error) {
+                        console.error(`Lỗi khi tính toán doanh số cho ${contributor}:`, error);
+                        branchSales[contributor] = 0;
+                    }
+                }
+            } else {
+                console.log('Không có contributors nào để xử lý.');
+            }
+            // lấy top 99 người có giá trị đóng góp cao nhất để đấy vào
+            listUsers.sort(function (a, b) {
+                return b.userPoint - a.userPoint;
+            });
+            var count = listUsers.length;
+            if (count > 99) {
+                count = 99;
+            }
+            for (var i = 0; i < count; i++) {
+                var obj = listUsers[i];
+                try {
+                    var userPoint = truncateEtherStringForWeiConversion(obj.userPoint.toString());
+                    var values = web3.utils.toWei(userPoint);
+                    const tx = {
+                        from: fromAccount,
+                        to: contributionContractAddress,
+                        gas: await contributionContract.methods.updateContributionValue(obj.address, values).estimateGas({ from: fromAccount }),
+                        data: contributionContract.methods.updateContributionValue(obj.address, values).encodeABI()
+                    };
+                    const signedTx = await web3.eth.accounts.signTransaction(tx, privateKey);
+                    const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+                }
+                catch (error) {
+                    console.log('Lỗi cập nhật top 99 cho :' + obj.address);
+                };
+            }
+            await updateTop99Ranking();
+            console.log('Danh sách đã được làm mới updateTop99Ranking');
+        };
+        //updateContributionValue();
+        // Cập nhật danh sách Top99
+        async function updateTop99Ranking() {
+            const tx = {
+                from: fromAccount,
+                to: contributionContractAddress,
+                gas: await contributionContract.methods.updateTop99Ranking().estimateGas({ from: fromAccount }),
+                data: contributionContract.methods.updateTop99Ranking().encodeABI()
+            };
+            const signedTx = await web3.eth.accounts.signTransaction(tx, privateKey);
+            const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+            console.log('Danh sách đã được làm mới updateTop99Ranking');
+        };
+        // Hàm này tính toán trả hoa hồng cho những người thuộc top 99. Ngày gọi 1 lần
+        async function calculatetop99Reward() {
+            try {
+                var dailyTotalRebaseTokenOutput = await rebaseIn24();
+                console.log('Bắt đầu gọi lấy top99...');
+                var top99SetLength = await contributionContract.methods.getTop99UserCount().call();
+                var Mtop99 = 0;
+                var topContributors = [];
+                for (var i = 0; i < top99SetLength; i++) {
+                    var user = await contributionContract.methods.getTop99UserAtIndex(i).call();
+                    var contributionValue = await contributionContract.methods.top99ContributionValues(user).call();
+                    var contributionValueFloat = parseFloat(web3.utils.fromWei(contributionValue, 'ether'));
+                    var obj = new Object();
+                    obj.address = user;
+                    obj.contributionValue = contributionValueFloat;
+                    topContributors[topContributors.length] = obj;
+                    Mtop99 += contributionValueFloat
+                };
+                for (var i = 0; i < topContributors.length; i++) {
+                    var obj = topContributors[i];
+                    try {
+                        // hệ số cá nhân
+                        var N = getPersonalIncentiveFactor(obj.contributionValue);
+                        // tỷ lệ đóng gọp
+                        var M = obj.contributionValue;
+                        var DailyReward = N * M / Mtop99 * dailyTotalRebaseTokenOutput * 0.1;
+                        // cập nhật hoa hồng cho top 99
+                        var dailyRewardInWei = web3.utils.toWei(DailyReward.toFixed(8).toString());
+                        const tx = {
+                            from: fromAccount,
+                            to: contributionContractAddress,
+                            gas: await contributionContract.methods.calculatetop99Reward(obj.address, dailyRewardInWei).estimateGas({ from: fromAccount }),
+                            data: contributionContract.methods.calculatetop99Reward(obj.address, dailyRewardInWei).encodeABI()
+                        };
+                        const signedTx = await web3.eth.accounts.signTransaction(tx, privateKey);
+                        const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+                        console.log(`Đã gọi calculatetop99Reward cho ${obj.address}. Hash giao dịch: ${receipt.transactionHash}`);
+                    }
+                    catch (error) {
+                        console.log(`Đã xảy ra lỗi calculatetop99Reward cho ${obj.address}`);
+                        console.error('Đã xảy ra lỗi:', error);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Đã xảy ra lỗi:', error);
+            }
+        }
+        //================================= Hoa hồng cho toàn bộ người phát triển=================================//
+        // Ngày gọi 1 lần hàm processContributorsForSales để trả hoa hồng                                         //
+        //========================================================================================================//
+        async function callCalculateWeightRewards(userAddress, rewardAmount) {
+            try {
+                var rewardAmountTmp = truncateEtherStringForWeiConversion(rewardAmount.toString());
+                var amountInWei = web3.utils.toWei(rewardAmountTmp.toString(), 'ether');
+                const tx = {
+                    from: fromAccount,
+                    to: contributionContractAddress,
+                    gas: await contributionContract.methods.calculateWeightRewards(userAddress, amountInWei).estimateGas({ from: fromAccount }),
+                    data: contributionContract.methods.calculateWeightRewards(userAddress, amountInWei).encodeABI()
+                };
+                const signedTx = await web3.eth.accounts.signTransaction(tx, privateKey);
+                const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+                console.log(`Đã gọi callCalculateWeightRewards cho ${userAddress}. Hash giao dịch: ${receipt.transactionHash}`);
+                return tx;
+            } catch (error) {
+                console.error('Lỗi khi gọi callCalculateWeightRewards:', error);
+                return null;
+            }
+        }
+        async function getBranchSales(rootAddress, depth = 1) {
+            let totalSales = 0;
+            const referrals = await communityContract.methods.referralsOf(rootAddress).call();
+            const discountFactor = Math.pow(0.9, depth - 1); // 1 for F1, 0.9 for F2, etc.
+            for (const ref of referrals) {
+                try {
+                    const principal = await stakingContract.methods.principal(ref).call();
+                    totalSales += parseFloat(web3.utils.fromWei(principal, 'ether')) * discountFactor;
+                    totalSales += await getBranchSales(ref, depth + 1);
+                } catch (error) {
+                    console.error(`Lỗi khi lấy principal hoặc referrals cho ${ref}:`, error);
+                }
+            }
+            return totalSales;
+        }
+        async function getBranchSalesLeftMax(rootAddress, maxbranch, depth = 1) {
+            let totalSales = 0;
+            const referrals = await communityContract.methods.referralsOf(rootAddress).call();
+            const discountFactor = Math.pow(0.9, depth - 1); // 1 for F1, 0.9 for F2, etc.
+            for (const ref of referrals) {
+                try {
+                    if (ref == maxbranch) {
+                        continue;
+                    }
+                    const principal = await stakingContract.methods.principal(ref).call();
+                    totalSales += parseFloat(web3.utils.fromWei(principal, 'ether')) * discountFactor;
+                    totalSales += await getBranchSales(ref, depth + 1);
+                } catch (error) {
+                    console.error(`Lỗi khi lấy principal hoặc referrals cho ${ref}:`, error);
+                }
+            }
+            return totalSales;
+        }
+        function getPersonalIncentiveFactor(stakedUsdValue) {
+            const usdValue = parseFloat(stakedUsdValue) * priceU2u;
+            if (usdValue >= 10000) return 1;
+            else if (usdValue >= 8000) return 0.94;
+            else if (usdValue >= 6000) return 0.88;
+            else if (usdValue >= 4000) return 0.82;
+            else if (usdValue >= 2000) return 0.76;
+            else if (usdValue >= 1000) return 0.73;
+            return 0.7;
+        }
+        var rebase24Values = 0;
+        var priceU2u = 0;
+        async function processContributorsForSales() {
+            try {
+                const U2U_ADDRESS = '0x558e7139800f8bc119f68d23a6126fffd43a66a6'; // USDC trên Mainnet
+                const USDT_ADDRESS = '0xdac17f958d2ee523a2206206994597c13d831ec7'; // USDC trên Mainnet
+                const FEE_MEDIUM = 500; // 1%
+                priceU2u = await getUniswapV3Price(U2U_ADDRESS, '1', USDT_ADDRESS, FEE_MEDIUM);
+                rebase24Values = await rebaseIn24();
+                console.log('Giá trị rebase 24:', rebase24Values, 'RAI');
+                console.log('Bắt đầu lấy danh sách contributors...');
+                const contributors = await contributionContract.methods.getAllContributors().call();
+                if (contributors && contributors.length > 0) {
+                    console.log('Bắt đầu tính toán điểm đóng góp toàn hệ thống Mtotal');
+                    let totalSystemSales = 0;
+                    for (const contributor of contributors) {
+                        console.log(`Đang tính điểm đóng góp cho ID: ${contributor}`);
+                        try {
+                            var directReferrals = await communityContract.methods.referralsOf(contributor).call();
+                            if (directReferrals.length > 1) {
+                                let largestF1Address = null;
+                                let maxF1Sales = 0;
+                                for (var f1Address of directReferrals) {
+                                    var sales = await getBranchSales(f1Address);
+                                    var f1Principal = await stakingContract.methods.principal(f1Address).call();
+                                    sales += parseFloat(web3.utils.fromWei(f1Principal, 'ether'));
+                                    if (sales > maxF1Sales) {
+                                        maxF1Sales = sales;
+                                        largestF1Address = f1Address;
+                                    }
+                                }
+                                var personalRemainingTotalSales = await getBranchSalesLeftMax(contributor, largestF1Address);
+                                const personalStakedRAI = await stakingContract.methods.principalStakedRAI(contributor).call();
+                                const personalIncentiveFactor = getPersonalIncentiveFactor(web3.utils.fromWei(personalStakedRAI, 'ether')); // N
+                                var mUser = personalIncentiveFactor * personalRemainingTotalSales * 3;
+                                totalSystemSales += mUser;
+                                //Lưu thông tin điểm đóng góp của từng cá nhân vào DB
+                                const history1 = { address: contributor, values: mUser, timestamp: Date.now() };
+                                await saveUserHistory(history1);
+                            }
+                        } catch (error) {
+                            console.error(`Lỗi khi tính toán doanh số cho ${contributor}:`, error);
+                        }
+                    };
+                    console.log('Tổng điểm đóng góp của toàn hệ thống (Mtotal):', totalSystemSales);
+                    if (totalSystemSales == 0) {
+                        return;
+                    }
+                    //Lưu thông tin điểm đóng góp của toàn hệ thống vào
+                    const today = new Date().toISOString().slice(0, 10); // Lấy ngày hiện tại dạng YYYY-MM-DD
+                    await saveDailyTotal(today, totalSystemSales);
+
+                    for (const contributorAddress of contributors) {
+                        const branchSales = {};
+                        try {
+                            // lấy các F1 của contributor
+                            var directReferrals = await communityContract.methods.referralsOf(contributorAddress).call();
+                            if (directReferrals.length > 1) {
+                                let largestF1Address = null;
+                                let maxF1Sales = 0;
+                                for (var f1Address of directReferrals) {
+                                    var sales = await getBranchSales(f1Address);
+                                    var f1Principal = await stakingContract.methods.principal(f1Address).call();
+                                    sales += parseFloat(web3.utils.fromWei(f1Principal, 'ether'));
+                                    if (sales > maxF1Sales) {
+                                        maxF1Sales = sales;
+                                        largestF1Address = f1Address;
+                                    }
+                                }
+                                console.log(`Doanh số lớn nhất của F1 của ${contributorAddress}:`, largestF1Address);
+                                var personalRemainingTotalSales = await getBranchSalesLeftMax(contributorAddress, largestF1Address);
+                                const personalStakedRAI = await stakingContract.methods.principalStakedRAI(contributorAddress).call();
+                                const personalIncentiveFactor = getPersonalIncentiveFactor(web3.utils.fromWei(personalStakedRAI, 'ether')); // N
+                                console.log(`điểm đóng góp của ${contributorAddress}:`, personalIncentiveFactor * personalRemainingTotalSales * 3);
+                                const dailyReward = (personalIncentiveFactor * personalRemainingTotalSales * 3 / totalSystemSales) * rebase24Values * 0.73;
+                                console.log(`Hoa hồng hàng ngày cho ${contributorAddress}:`, dailyReward);
+                                // update hoa hồng
+                                if (dailyReward != null && dailyReward > 0) {
+                                    await callCalculateWeightRewards(contributorAddress, dailyReward);
+                                }
+                            };
+
+                        } catch (error) {
+                            console.error(`Lỗi khi tính toán doanh số cho ${contributor}:`, error);
+                            branchSales[contributor] = 0;
+                        }
+                    }
+                } else {
+                    console.log('Không có contributors nào để xử lý.');
+                }
+                // hoa hồng mới
+                await calculateValueRatios();
+                // hoa hồng top 99
+                await calculatetop99Reward();
+            } catch (error) {
+                console.error('Đã xảy ra lỗi:', error);
+            }
+        }
+
+        //processContributorsForSales();
+
+        /// == Sau khi chạy xong processContributorsForSales thì có đủ thông tin để chạy hoa hồng mới trong ngày.
+        // lấy giá trị đóng góp ngày hiện tại - giá trị đóng góp hôm trước. nếu có giá trị đóng góp thì được chia hoa hồng
+        // thực hiện chạy calculateValueRatios sau khi đã chay hoàn tất processContributorsForSales;
+        async function calculateDailyNewReward(userAddress, rewardAmount) {
+            try {
+                var rewardAmountTmp = truncateEtherStringForWeiConversion(rewardAmount.toString());
+                var amountInWei = web3.utils.toWei(rewardAmountTmp.toString(), 'ether');
+                const tx = {
+                    from: fromAccount,
+                    to: contributionContractAddress,
+                    gas: await contributionContract.methods.calculateDailyNewReward(userAddress, amountInWei).estimateGas({ from: fromAccount }),
+                    data: contributionContract.methods.calculateDailyNewReward(userAddress, amountInWei).encodeABI()
+                };
+                const signedTx = await web3.eth.accounts.signTransaction(tx, privateKey);
+                const receipt = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+                console.log(`Đã gọi calculateDailyNewReward cho ${userAddress}. Hash giao dịch: ${receipt.transactionHash}`);
+                return tx;
+            } catch (error) {
+                console.error('Lỗi khi gọi calculateDailyNewReward:', error);
+                return null;
+            }
+        }
+        async function calculateValueRatios() {
+            await initializeDatabase();
+
+            // 1. Lấy và tính Xtotal
+            const allDailyTotals = await getAllDailyTotals();
+            let Xtotal = 0;
+            if (allDailyTotals.length >= 2) {
+                const lastTotal = allDailyTotals[allDailyTotals.length - 1].Mtotal;
+                const secondLastTotal = allDailyTotals[allDailyTotals.length - 2].Mtotal;
+                Xtotal = lastTotal - secondLastTotal;
+            } else {
+                console.warn("Không đủ bản ghi dailyTotals để tính Xtotal.");
+                return {};
+            }
+            if (Xtotal == 0) {
+                return;
+            }
+            const ratios = {};
+            const processedAddresses = new Set();
+
+            // 2. Duyệt qua lịch sử và tính Hvalues
+            const transaction = db.transaction([historyStoreName], 'readonly');
+            const historyStore = transaction.objectStore(historyStoreName);
+            const addressIndex = historyStore.index(addressIndexName);
+            const getAllKeysRequest = addressIndex.getAllKeys();
+
+            return new Promise((resolve, reject) => {
+                getAllKeysRequest.onsuccess = async () => {
+                    const allAddresses = getAllKeysRequest.result;
+                    for (const address of allAddresses) {
+                        if (!processedAddresses.has(address)) {
+                            processedAddresses.add(address);
+                            const historyForAddress = await getHistoryByAddress(address);
+                            let Hvalues = 0;
+                            if (historyForAddress.length >= 2) {
+                                const lastValues = historyForAddress[historyForAddress.length - 1].values;
+                                const secondLastValues = historyForAddress[historyForAddress.length - 2].values;
+
+                                // Tính hiệu số values (ví dụ: lấy hiệu số của phần tử đầu tiên)
+                                if (Array.isArray(lastValues) && Array.isArray(secondLastValues) && lastValues.length > 0 && secondLastValues.length > 0) {
+                                    Hvalues = lastValues[0] - secondLastValues[0];
+                                } else if (!Array.isArray(lastValues) && !Array.isArray(secondLastValues)) {
+                                    Hvalues = (lastValues || 0) - (secondLastValues || 0);
+                                } else {
+                                    console.warn(`Không thể tính Hvalues cho địa chỉ ${address} do cấu trúc values không phù hợp.`);
+                                }
+                            } else {
+                                console.warn(`Không đủ lịch sử cho địa chỉ ${address} để tính Hvalues.`);
+                            }
+
+                            // Tính tỷ lệ và thêm vào kết quả
+                            if (Xtotal > 0 && Hvalues > 0) {
+                                // thực hiện trả hoa hồng address
+                                var userReward = (Hvalues / Xtotal) * rebase24Values * 0.07;
+                                await calculateDailyNewReward(address, userReward);
+                            }
+                        }
+                    }
+                    resolve(ratios);
+                };
+
+                getAllKeysRequest.onerror = (event) => {
+                    reject(`Lỗi khi lấy danh sách địa chỉ: ${event}`);
+                };
+            });
+        }
+
+        //================================= Các hàm chạy tự động theo giờ đặt trước=================================//
+        // Start Bonus
+        let bonusInterval;
+        const CHECK_INTERVAL_BONUS = 60 * 1000 * 60 * 24; // 24 để chạy hoa hồng (tính bằng milliseconds)
+        function AutoStartBonus() {
+            if (bonusInterval) {
+                clearInterval(bonus1Interval); // Xóa interval cũ nếu có
+            }
+            bonusInterval = setInterval(processContributorsForSales, CHECK_INTERVAL_BONUS);
+        };
+        AutoStartBonus();
+
+        let top99Interval;
+        const CHECK_INTERVAL_TOP_99 = 60 * 1000 * 60 * 1; // 1 để chạy cập nhật top 99 (tính bằng milliseconds)
+        function AutoStartTop99() {
+            if (top99Interval) {
+                clearInterval(top99Interval); // Xóa interval cũ nếu có
+            }
+            top99Interval = setInterval(updateContributionValue, CHECK_INTERVAL_TOP_99);
+        };
+        AutoStartTop99();
+
+
+
+        // Help
+        function truncateEtherStringForWeiConversion(value, decimalLimit = 18) {
+            // Chuyển đổi giá trị đầu vào thành chuỗi để xử lý nhất quán
+            let strValue = String(value);
+
+            // Tìm vị trí dấu chấm thập phân
+            const decimalPointIndex = strValue.indexOf('.');
+
+            // Nếu không có dấu chấm thập phân hoặc số chữ số sau dấu chấm không vượt quá giới hạn
+            if (decimalPointIndex === -1 || (strValue.length - 1 - decimalPointIndex) <= decimalLimit) {
+                return strValue; // Chuỗi đã hợp lệ, không cần cắt
+            }
+
+            // Nếu có quá nhiều chữ số thập phân, cắt bỏ phần thừa
+            // Phần nguyên + dấu chấm + số chữ số thập phân theo giới hạn
+            return strValue.substring(0, decimalPointIndex + 1 + decimalLimit);
+        }
+        const RPC_URL_ETH = 'https://mainnet.infura.io/v3/8721d9c0b703430b85c60f5587103b21'; // Sử dụng Cloudflare RPC cho đơn giản
+        const web3X = new Web3(RPC_URL_ETH);
+
+        // Địa chỉ contract Quoter V3 trên Ethereum Mainnet
+        const QUOTER_V3_ADDRESS = '0x61fFE014bA17989E743c5F6cB21bF9697530B21e';
+        var pancakeswapV3QuoterABI = [{ "inputs": [{ "internalType": "address", "name": "_deployer", "type": "address" }, { "internalType": "address", "name": "_factory", "type": "address" }, { "internalType": "address", "name": "_WETH9", "type": "address" }], "stateMutability": "nonpayable", "type": "constructor" }, { "inputs": [], "name": "WETH9", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "deployer", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [], "name": "factory", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "int256", "name": "amount0Delta", "type": "int256" }, { "internalType": "int256", "name": "amount1Delta", "type": "int256" }, { "internalType": "bytes", "name": "path", "type": "bytes" }], "name": "pancakeV3SwapCallback", "outputs": [], "stateMutability": "view", "type": "function" }, { "inputs": [{ "internalType": "bytes", "name": "path", "type": "bytes" }, { "internalType": "uint256", "name": "amountIn", "type": "uint256" }], "name": "quoteExactInput", "outputs": [{ "internalType": "uint256", "name": "amountOut", "type": "uint256" }, { "internalType": "uint160[]", "name": "sqrtPriceX96AfterList", "type": "uint160[]" }, { "internalType": "uint32[]", "name": "initializedTicksCrossedList", "type": "uint32[]" }, { "internalType": "uint256", "name": "gasEstimate", "type": "uint256" }], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "components": [{ "internalType": "address", "name": "tokenIn", "type": "address" }, { "internalType": "address", "name": "tokenOut", "type": "address" }, { "internalType": "uint256", "name": "amountIn", "type": "uint256" }, { "internalType": "uint24", "name": "fee", "type": "uint24" }, { "internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160" }], "internalType": "struct IQuoterV2.QuoteExactInputSingleParams", "name": "params", "type": "tuple" }], "name": "quoteExactInputSingle", "outputs": [{ "internalType": "uint256", "name": "amountOut", "type": "uint256" }, { "internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160" }, { "internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32" }, { "internalType": "uint256", "name": "gasEstimate", "type": "uint256" }], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "internalType": "bytes", "name": "path", "type": "bytes" }, { "internalType": "uint256", "name": "amountOut", "type": "uint256" }], "name": "quoteExactOutput", "outputs": [{ "internalType": "uint256", "name": "amountIn", "type": "uint256" }, { "internalType": "uint160[]", "name": "sqrtPriceX96AfterList", "type": "uint160[]" }, { "internalType": "uint32[]", "name": "initializedTicksCrossedList", "type": "uint32[]" }, { "internalType": "uint256", "name": "gasEstimate", "type": "uint256" }], "stateMutability": "nonpayable", "type": "function" }, { "inputs": [{ "components": [{ "internalType": "address", "name": "tokenIn", "type": "address" }, { "internalType": "address", "name": "tokenOut", "type": "address" }, { "internalType": "uint256", "name": "amount", "type": "uint256" }, { "internalType": "uint24", "name": "fee", "type": "uint24" }, { "internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160" }], "internalType": "struct IQuoterV2.QuoteExactOutputSingleParams", "name": "params", "type": "tuple" }], "name": "quoteExactOutputSingle", "outputs": [{ "internalType": "uint256", "name": "amountIn", "type": "uint256" }, { "internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160" }, { "internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32" }, { "internalType": "uint256", "name": "gasEstimate", "type": "uint256" }], "stateMutability": "nonpayable", "type": "function" }];
+
+        const quoterContract = new web3X.eth.Contract(pancakeswapV3QuoterABI, QUOTER_V3_ADDRESS);
+        async function getUniswapV3Price(tokenInAddress, amountIn, tokenOutAddress, fee) {
+            try {
+                const decimalsIn = 18;
+                const amountInWei = web3X.utils.toWei(amountIn, 'ether');
+                const decimalsOut = 6;
+
+                var params = {
+                    tokenIn: tokenInAddress,
+                    tokenOut: tokenOutAddress,
+                    amountIn: amountInWei,
+                    fee: fee,
+                    sqrtPriceLimitX96: 0
+                };
+
+                const quote = await quoterContract.methods.quoteExactInputSingle(params).call();
+                if (quote) {
+                    const amoutAccept = Number(quote.amountOut) / (10 ** 6);
+                    console.log(amoutAccept);
+                    priceU2uUsd = amoutAccept;
+                    return priceU2uUsd;
+                } else {
+                    return null;
+                }
+
+            } catch (error) {
+                console.error("Lỗi khi lấy giá:", error);
+            }
+        }
+    </script>
+</body>
+</html>

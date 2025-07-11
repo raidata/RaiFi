@@ -1,0 +1,135 @@
+﻿@media (max-width:767.98px) {
+    .apy-time-rebase {
+        padding-top: 0 !important
+    }
+
+    .title-page {
+        transform: scale(.8,.8);
+        transform-origin: left top
+    }
+
+    .stake p span {
+        font-size: 18px !important
+    }
+
+    .legend_a {
+        right: 0 !important
+    }
+
+    .legend_b {
+        left: 0 !important
+    }
+
+    .legend-item {
+        padding: 60px 0 !important
+    }
+
+    .apy-time {
+        margin-bottom: 10px
+    }
+
+    .form-stake .input-button-group .btn-main {
+        width: 96px !important;
+        margin-right: 33px !important;
+        margin-top: 12px !important;
+    }
+
+    .list-li li {
+        float: none !important;
+        width: 100% !important
+    }
+
+        .list-li li span {
+            display: block !important
+        }
+
+    .table-responsive tr td {
+        min-width: 142px !important
+    }
+
+    .table-responsive tr th {
+        font-size: 13px !important
+    }
+
+    .nav-tabs .nav-link {
+        padding: 10px !important;
+        font-size: 13px !important;
+    }
+
+    .list-li li:nth-child(2n+1) {
+        padding-right: 0
+    }
+
+    .list-li li span {
+        float: none !important;
+        font-size: 18px
+    }
+
+    .asset b {
+        font-size: 24px
+    }
+
+    #nav-claim-interest .form-stake .asset {
+        display: block !important
+    }
+
+    .list-btn button {
+        border: 1px solid rgb(255 255 255 / .15)
+    }
+
+    .list-btn li {
+        float: none !important;
+        width: 100% !important;
+    }
+
+    #nav-bond .box-p {
+        margin-bottom: 20px
+    }
+
+    #btn-contribution, #btn-stake, #button-invite .btn-main {
+        text-align: center;
+        position: relative;
+        margin: 10px auto 0;
+        right: 0;
+        display: block
+    }
+
+    #title-contribution {
+        transform: scale(1,1);
+        font-size: 17px;
+        letter-spacing: 0
+    }
+
+    #contribution-asset .asset {
+        display: block
+    }
+
+    #nav-tab-contribution button {
+        padding: 10px 3px !important;
+        font-size: 13px !important
+    }
+
+        #nav-tab-contribution button:first-child {
+            margin-right: 6px
+        }
+
+    .list-btn button small {
+        float: none !important;
+        display: block !important;
+    }
+
+    #nav-tab-contribution {
+        justify-content: normal
+    }
+
+    .title-page img {
+        width: 28px;
+        height: 28px;
+        margin-left: -23px
+    }
+
+    .title-page:after {
+        transform: scale(.7);
+        transform-origin: left top
+    }
+}
