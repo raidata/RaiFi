@@ -124,25 +124,23 @@ contract Community {
         directCount = members[member].referrals.length;
         uint rootstake = contributionValueContract.saleContributionValue(member);
         uint rootcontribution = contributionValueContract.totalContributionValue(member);
-        (fullTreeCount, fullstake, fullcontribution) = _getFullReferralTreeStakeInternal(member);
-        return (directCount, fullTreeCount,fullstake + rootstake,fullcontribution + rootcontribution);
+        (fullTreeCount, fullcontribution) = _getFullReferralTreeStakeInternal(member);
+        return (directCount, fullTreeCount, rootstake,fullcontribution + rootcontribution);
     }
     
-    function _getFullReferralTreeStakeInternal(address member) internal view returns (uint totalCount, uint totalStake, uint totalContribution) {
+    function _getFullReferralTreeStakeInternal(address member) internal view returns (uint totalCount, uint totalContribution) {
         uint count = 1;
-        uint stake = contributionValueContract.saleContributionValue(member);
         uint contribution = contributionValueContract.totalContributionValue(member);
         address[] memory directReferrals = members[member].referrals;
         for (uint i = 0; i < directReferrals.length; i++) {
             if (directReferrals[i] == address(0)) { 
                 continue; 
             }
-            (uint subTreeCount, uint subTreeStake, uint subTreeContribution) = _getFullReferralTreeStakeInternal(directReferrals[i]);
+            (uint subTreeCount,  uint subTreeContribution) = _getFullReferralTreeStakeInternal(directReferrals[i]);
             count += subTreeCount;
-            stake += subTreeStake;
             contribution += subTreeContribution;
         }
-        return (count, stake, contribution);
+        return (count, contribution);
     }
     // Owner can update member level (for potential future use)
     function updateMemberLevel(address member, uint256 level) external onlyOwner {
