@@ -1,1 +1,0 @@
-﻿raiwapp.config(function ($translateProvider, tmhDynamicLocaleProvider) { tmhDynamicLocaleProvider.localeLocationPattern('/Scripts/i18n/angular-locale_{{locale}}.js'); $translateProvider.useStaticFilesLoader({ prefix: '/AppJs/locale-', suffix: '.json' }); $translateProvider.preferredLanguage('en'); });

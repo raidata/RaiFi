@@ -876,12 +876,13 @@ raiwapp.controller('raiwappController', function ($scope, $cookieStore, $transla
                 var isMember = await communityContract.methods.isMember(accountAddress).call();
                 if (isMember) {
                     $scope.isMember = 1;
+
                     var referralCounts = await communityContract.methods.getReferralCounts(accountAddress).call();
                     $scope.DirectInvitation = Number(referralCounts.directCount);
                     $scope.NumberOfTeam = Number(referralCounts.fullTreeCount) - 1;
-                    var totalSalse = Number(referralCounts.fullstake);
                     var totalContribution = Number(referralCounts.fullcontribution);
                     $scope.TotalContribution = web3ReadOnly.utils.fromWei(totalContribution, 'ether');
+                    var totalSalse = await contributionContract.methods.saleContributionValue(accountAddress).call();
                     $scope.TotalSale = web3ReadOnly.utils.fromWei(totalSalse, 'ether');
                     $scope.$apply();
                     var referrerAddress = await communityContract.methods.referrerOf(accountAddress).call();
